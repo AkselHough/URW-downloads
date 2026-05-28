@@ -1,0 +1,365 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver version to release (e.g. 0.0.20)"
+        required: true
+        type: string
+      ref:
+        description: "URW ref to build from (branch, tag, or commit SHA)"
+        required: false
+        default: main
+        type: string
+      draft:
+        description: "Publish as draft (safe — hide from public until you click Publish)"
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  metadata:
+    name: Prepare release metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      channel_tag: ${{ steps.meta.outputs.channel_tag }}
+      ref: ${{ steps.meta.outputs.ref }}
+    steps:
+      - name: Compute metadata
+        id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          SEMVER_REGEX='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if [[ ! "${INPUT_VERSION}" =~ ${SEMVER_REGEX} ]]; then
+            echo "Version '${INPUT_VERSION}' is not in x.y.z format." >&2
+            exit 1
+          fi
+
+          {
+            echo "version=${INPUT_VERSION}"
+            echo "tag_name=v${INPUT_VERSION}"
+            echo "channel_tag=desktop-prod"
+            echo "ref=${INPUT_REF}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tag does not already exist
+        env:
+          TAG_NAME: ${{ steps.meta.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            echo "Tag ${TAG_NAME} already exists in this repo. Pick a new version or delete the existing tag/release first." >&2
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG_NAME: ${{ steps.meta.outputs.tag_name }}
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: metadata
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS (universal)
+            os: macos-14
+            args: "--target universal-apple-darwin"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+            tauri_platform: macos
+            node_platform: darwin
+          - label: Linux
+            os: ubuntu-22.04
+            rust_targets: ""
+            tauri_platform: linux
+            node_platform: linux
+            args: "--features linux-gpu"
+          - label: Windows
+            os: windows-latest
+            args: "--features windows-gpu"
+            rust_targets: ""
+            tauri_platform: windows
+            node_platform: win32
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+      RELEASE_ENV: prod
+      RELEASE_FLAVOR: prod
+      FLAVOR: prod
+      VITE_FLAVOR: prod
+      URW_BUILD_FLAVOR: prod
+      URW_DESKTOP_FLAVOR: prod
+      TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+      TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_PRIVATE_KEY_PASSWORD }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+      APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+    steps:
+      - name: Checkout URW source
+        uses: actions/checkout@v4
+        with:
+          repository: AkselHough/URW
+          ref: ${{ needs.metadata.outputs.ref }}
+          token: ${{ secrets.URW_SOURCE_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Sync Tauri release configuration
+        run: node scripts/ci/set-tauri-release-config.mjs
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop/src-tauri -> target
+
+      - name: Set Windows-only build environment
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          echo "CARGO_TARGET_DIR=D:\cargo" >> $env:GITHUB_ENV
+          echo "WHISPER_CMAKE_ARGS=-DGGML_VULKAN=ON -DCMAKE_INSTALL_PREFIX=C:/w" >> $env:GITHUB_ENV
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+
+          if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then
+            WEBKIT_PKG=libwebkit2gtk-4.1-dev
+          else
+            WEBKIT_PKG=libwebkit2gtk-4.0-dev
+          fi
+
+          sudo apt-get install -y \
+            build-essential pkg-config cmake \
+            libgtk-3-dev "$WEBKIT_PKG" \
+            libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev patchelf \
+            libvulkan1 libvulkan-dev vulkan-tools
+
+          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Vulkan SDK (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          version: "1.3.290.0"
+          cache: true
+          runtime: true
+
+      - name: Install GPU build deps (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install -y llvm
+          choco install -y cmake --installargs 'ADD_CMAKE_TO_PATH=System' --no-progress
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin"         >> $env:GITHUB_ENV
+          "CLANG_PATH=C:\Program Files\LLVM\bin\clang.exe"  >> $env:GITHUB_ENV
+          "C:\Program Files\LLVM\bin"                       >> $env:GITHUB_PATH
+
+      - name: Import Apple signing certificate
+        if: matrix.os == 'macos-14'
+        id: import-macos-cert
+        uses: apple-actions/import-codesign-certs@v2
+        with:
+          create-keychain: true
+          keychain: build
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+          keychain-timeout: 3600
+          set-default-keychain: true
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Allow codesign access to private keys (CI keychain)
+        if: matrix.os == 'macos-14'
+        run: |
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain-db
+
+      - name: Assert Developer ID Application identity is present
+        if: matrix.os == 'macos-14'
+        run: |
+          set -euo pipefail
+          out="$(security find-identity -v -p codesigning)"
+          echo "$out"
+          echo "$out" | grep -q "Developer ID Application" || {
+            echo "No 'Developer ID Application' identity found." >&2
+            exit 1
+          }
+
+      - name: Prepare Apple notary API key
+        if: matrix.os == 'macos-14'
+        run: |
+          set -euo pipefail
+          echo "$APPLE_API_KEY_BASE64" | base64 -d > AuthKey.p8
+          ls -l AuthKey.p8
+        shell: bash
+
+      - name: Verify Apple signing identity
+        if: matrix.os == 'macos-14'
+        run: |
+          set -euo pipefail
+          keychain_path="${{ steps.import-macos-cert.outputs['keychain-path'] }}"
+          if [[ -z "${keychain_path}" ]]; then
+            keychain_path="${HOME}/Library/Keychains/build.keychain-db"
+          fi
+          output="$(security find-identity -v -p codesigning "${keychain_path}" || true)"
+          printf '%s\n' "$output"
+          summary_count="$(printf '%s\n' "$output" | awk '/valid identities found$/ { print $1; exit }')"
+          if [[ -z "${summary_count}" || ! "${summary_count}" =~ ^[0-9]+$ ]]; then
+            summary_count="$(printf '%s\n' "$output" | awk '/^[[:space:]]*[0-9]+\)/ { count++ } END { print count+0 }')"
+          fi
+          if [[ "${summary_count:-0}" -eq 0 ]]; then
+            echo "No valid code signing identities were imported." >&2
+            exit 1
+          fi
+
+      - name: Notary connectivity probe
+        if: matrix.os == 'macos-14'
+        run: |
+          xcrun notarytool history \
+            --key "${GITHUB_WORKSPACE}/AuthKey.p8" \
+            --key-id "${APPLE_API_KEY_ID}" \
+            --issuer "${APPLE_API_ISSUER}"
+
+      - name: Compute Tauri CLI args
+        id: tauri-cli-args
+        shell: bash
+        env:
+          MATRIX_ARGS: ${{ matrix.args }}
+        run: |
+          set -euo pipefail
+          config_file="src-tauri/tauri.prod.conf.json"
+          config_flag="--config ${config_file}"
+          matrix_args="${MATRIX_ARGS}"
+          if [[ -z "${matrix_args}" ]]; then
+            combined_args="${config_flag}"
+          elif [[ "${matrix_args}" == *" -- "* ]]; then
+            before="${matrix_args%% -- *}"
+            after="${matrix_args#* -- }"
+            if [[ -n "${before}" ]]; then
+              combined_args="${before} ${config_flag} -- ${after}"
+            else
+              combined_args="${config_flag} -- ${after}"
+            fi
+          else
+            combined_args="${matrix_args} ${config_flag}"
+          fi
+          echo "args=${combined_args}" >> "$GITHUB_OUTPUT"
+
+      - name: Turbo build desktop workspace
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
+          CMAKE_OSX_DEPLOYMENT_TARGET: "13.3"
+          TAURI_PLATFORM: ${{ matrix.tauri_platform }}
+          URW_DESKTOP_PLATFORM: ${{ matrix.node_platform }}
+        run: npm run build -- --filter=desktop...
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PLATFORM: ${{ matrix.tauri_platform }}
+          URW_DESKTOP_PLATFORM: ${{ matrix.node_platform }}
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
+          CMAKE_OSX_DEPLOYMENT_TARGET: "13.3"
+          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ env.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_PATH: ${{ github.workspace }}/AuthKey.p8
+          APPLE_API_ISSUER: ${{ env.APPLE_API_ISSUER }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npm run --workspace desktop tauri
+          args: ${{ steps.tauri-cli-args.outputs.args }}
+          tagName: ${{ needs.metadata.outputs.tag_name }}
+          releaseName: URW ${{ needs.metadata.outputs.version }}
+          releaseBody: |
+            Automated build for version ${{ needs.metadata.outputs.version }}.
+          releaseDraft: ${{ inputs.draft }}
+          prerelease: false
+          includeUpdaterJson: true
+
+  update-channel:
+    name: Update auto-update channel
+    needs: [metadata, build]
+    runs-on: ubuntu-latest
+    if: ${{ inputs.draft == false }}
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.metadata.outputs.tag_name }}
+      CHANNEL_TAG: ${{ needs.metadata.outputs.channel_tag }}
+    steps:
+      - name: Download latest.json from release
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" --pattern "latest.json" --dir dist --clobber
+          if [[ ! -s dist/latest.json ]]; then
+            echo "latest.json not found in release ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+      - name: Validate latest.json
+        run: |
+          set -euo pipefail
+          version="$(jq -r '.version // empty' dist/latest.json)"
+          expected="${{ needs.metadata.outputs.version }}"
+          if [[ -z "${version}" ]]; then
+            echo "latest.json is missing 'version' field." >&2
+            exit 1
+          fi
+          if [[ "${version}" != "${expected}" ]]; then
+            echo "latest.json version '${version}' does not match expected '${expected}'." >&2
+            exit 1
+          fi
+
+      - name: Ensure channel release exists
+        run: |
+          set -euo pipefail
+          if ! gh release view "$CHANNEL_TAG" >/dev/null 2>&1; then
+            gh release create "$CHANNEL_TAG" \
+              --title "Auto-update channel: ${CHANNEL_TAG}" \
+              --notes "Always points at the latest released version of URW. Do not delete." \
+              --latest=false
+          fi
+
+      - name: Upload latest.json to channel
+        run: gh release upload "$CHANNEL_TAG" dist/latest.json --clobber
