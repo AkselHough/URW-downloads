@@ -202,11 +202,6 @@ jobs:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
-      - name: Allow codesign access to private keys (CI keychain)
-        if: matrix.os == 'macos-14'
-        run: |
-          security set-key-partition-list -S apple-tool:,apple: -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain-db
-
       - name: Assert Developer ID Application identity is present
         if: matrix.os == 'macos-14'
         run: |
