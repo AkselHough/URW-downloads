@@ -52,6 +52,7 @@ jobs:
 
       - name: Ensure tag does not already exist
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ steps.meta.outputs.tag_name }}
         run: |
           set -euo pipefail
@@ -59,10 +60,6 @@ jobs:
             echo "Tag ${TAG_NAME} already exists in this repo. Pick a new version or delete the existing tag/release first." >&2
             exit 1
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          TAG_NAME: ${{ steps.meta.outputs.tag_name }}
 
   build:
     name: Build ${{ matrix.label }}
