@@ -176,9 +176,9 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: jakoch/install-vulkan-sdk-action@v1
         with:
-          version: "1.3.290.0"
+          vulkan_version: 1.3.290.0
           cache: true
-          runtime: true
+          install_runtime: true
 
       - name: Install GPU build deps (Windows)
         if: matrix.os == 'windows-latest'
@@ -189,6 +189,20 @@ jobs:
           "LIBCLANG_PATH=C:\Program Files\LLVM\bin"         >> $env:GITHUB_ENV
           "CLANG_PATH=C:\Program Files\LLVM\bin\clang.exe"  >> $env:GITHUB_ENV
           "C:\Program Files\LLVM\bin"                       >> $env:GITHUB_PATH
+
+      - name: Setup MSVC developer environment (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Verify Windows build toolchain (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Write-Host "VULKAN_SDK=$env:VULKAN_SDK"
+          cl.exe 2>&1 | Select-Object -First 3
+          cmake --version
 
       - name: Install SimplySign Desktop (Windows)
         if: matrix.os == 'windows-latest'
@@ -217,8 +231,6 @@ jobs:
           create-keychain: true
           keychain: build
           keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
-          keychain-timeout: 3600
-          set-default-keychain: true
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
