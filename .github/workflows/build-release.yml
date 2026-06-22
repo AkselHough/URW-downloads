@@ -108,6 +108,7 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
     steps:
       - name: Checkout URW source
         uses: actions/checkout@v4
@@ -188,6 +189,19 @@ jobs:
           "LIBCLANG_PATH=C:\Program Files\LLVM\bin"         >> $env:GITHUB_ENV
           "CLANG_PATH=C:\Program Files\LLVM\bin\clang.exe"  >> $env:GITHUB_ENV
           "C:\Program Files\LLVM\bin"                       >> $env:GITHUB_PATH
+
+      - name: Install SimplySign Desktop (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/ci/install-simplysign.ps1
+
+      - name: Connect SimplySign cloud certificate (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+        run: powershell -ExecutionPolicy Bypass -File scripts/ci/connect-simplysign.ps1
 
       - name: Import Apple signing certificate
         if: matrix.os == 'macos-14'
