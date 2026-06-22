@@ -54,6 +54,22 @@ Notarization uses an **App Store Connect API key**, not the Certum cert:
 2. Create a key (Developer access), download the `.p8` once.
 3. Secrets: `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, plus `APPLE_TEAM_ID`.
 
+## Windows CI (GitHub-hosted runners)
+
+The build workflow installs SimplySign Desktop, configures registry keys so the login dialog appears, then authenticates with `CERTUM_OTP_URI` and signs via Tauri using `WINDOWS_CERTIFICATE_THUMBPRINT`.
+
+Required secrets on **URW-downloads**:
+
+| Secret | Description |
+| --- | --- |
+| `CERTUM_OTP_URI` | Full `otpauth://totp/...` URI from Certum QR setup |
+| `CERTUM_USERNAME` | SimplySign account email |
+| `WINDOWS_CERTIFICATE_THUMBPRINT` | SHA-1 thumbprint from `Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert` |
+
+### Troubleshooting: "Could not focus SimplySign Desktop login window"
+
+SimplySign often starts tray-only on CI runners. The workflow runs `scripts/ci/configure-simplysign.ps1` first to set `ShowLoginDialogOnStart=1` under `HKCU:\Software\Certum\SimplySign`. If Connect still fails, check the CI log for the window dump listing visible titles.
+
 ## Quick setup script
 
 ```bash
