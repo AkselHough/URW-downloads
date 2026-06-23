@@ -172,6 +172,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Download VC++ redistributable
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/ci/download-vc-redist.ps1
+
       - name: Install Vulkan SDK (Windows)
         if: matrix.os == 'windows-latest'
         uses: jakoch/install-vulkan-sdk-action@v1
@@ -319,6 +324,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PLATFORM: ${{ matrix.tauri_platform }}
           URW_DESKTOP_PLATFORM: ${{ matrix.node_platform }}
+          URW_VCREDIST_PATH: ${{ github.workspace }}\apps\desktop\src-tauri\windows\vc_redist.x64.exe
           MACOSX_DEPLOYMENT_TARGET: "13.3"
           CMAKE_OSX_DEPLOYMENT_TARGET: "13.3"
           APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
