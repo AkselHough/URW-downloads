@@ -221,12 +221,15 @@ jobs:
 
       - name: Connect SimplySign cloud certificate (Windows)
         if: matrix.os == 'windows-latest'
-        shell: pwsh
+        uses: nick-fields/retry@v3
         env:
           CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-        run: powershell -ExecutionPolicy Bypass -File scripts/ci/connect-simplysign.ps1
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: powershell -ExecutionPolicy Bypass -File scripts/ci/connect-simplysign.ps1
 
       - name: Import Apple signing certificate
         if: matrix.os == 'macos-14'
