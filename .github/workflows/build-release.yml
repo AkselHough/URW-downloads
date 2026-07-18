@@ -197,6 +197,11 @@ jobs:
         shell: pwsh
         run: ./scripts/ci/download-vc-redist.ps1
 
+      - name: Download Vosk Windows libraries
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/ci/download-vosk-windows.ps1
+
       - name: Install Windows build deps
         if: matrix.os == 'windows-latest'
         shell: pwsh
