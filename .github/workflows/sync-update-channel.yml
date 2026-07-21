@@ -1,0 +1,66 @@
+name: Sync auto-update channel
+
+# Fires when a draft version release is published (or a release is created as published).
+# Copies that release's latest.json onto the desktop-prod channel so installed apps
+# pick up the update. Draft/test builds never trigger this.
+on:
+  release:
+    types: [released]
+
+jobs:
+  sync:
+    name: Sync latest.json to desktop-prod
+    runs-on: ubuntu-latest
+    # Only sync real version releases (vX.Y.Z). Skip the desktop-prod channel release itself
+    # and any prereleases so we never recurse or push unfinished builds.
+    if: >-
+      startsWith(github.event.release.tag_name, 'v')
+      && !github.event.release.prerelease
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      CHANNEL_TAG: desktop-prod
+    steps:
+      - name: Download latest.json from published release
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" --pattern "latest.json" --dir dist --clobber
+          if [[ ! -s dist/latest.json ]]; then
+            echo "latest.json not found in release ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+      - name: Validate latest.json
+        run: |
+          set -euo pipefail
+          version="$(jq -r '.version // empty' dist/latest.json)"
+          expected="${RELEASE_TAG#v}"
+          if [[ -z "${version}" ]]; then
+            echo "latest.json is missing 'version' field." >&2
+            exit 1
+          fi
+          if [[ "${version}" != "${expected}" ]]; then
+            echo "latest.json version '${version}' does not match expected '${expected}'." >&2
+            exit 1
+          fi
+          echo "Validated latest.json for version ${version}."
+
+      - name: Ensure channel release exists
+        run: |
+          set -euo pipefail
+          if ! gh release view "$CHANNEL_TAG" >/dev/null 2>&1; then
+            gh release create "$CHANNEL_TAG" \
+              --title "Auto-update channel: ${CHANNEL_TAG}" \
+              --notes "Always points at the latest released version of URW. Do not delete." \
+              --latest=false
+          fi
+
+      - name: Upload latest.json to channel
+        run: |
+          set -euo pipefail
+          gh release upload "$CHANNEL_TAG" dist/latest.json --clobber
+          echo "Synced ${RELEASE_TAG} -> ${CHANNEL_TAG}/latest.json"
