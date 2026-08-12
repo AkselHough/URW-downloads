@@ -83,7 +83,7 @@ jobs:
             rust_targets: ""
             tauri_platform: linux
             node_platform: linux
-            args: "--features linux-gpu"
+            args: ""
           - label: Windows
             os: windows-latest
             args: ""
@@ -137,33 +137,7 @@ jobs:
         with:
           workspaces: |
             apps/desktop/src-tauri -> target
-          shared-key: ${{ matrix.os == 'windows-latest' && 'windows-avx2-baseline-v1' || 'non-windows' }}
-
-      - name: Set Windows-only build environment
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          # Portable Windows CPU baseline: AVX2 max (Intel 6th-10th gen / UHD 620 class).
-          # whisper-rs-sys forwards CMAKE_* env vars to CMake; GGML_* must use a toolchain file.
-          @'
-          # Portable Windows CPU baseline: AVX2 max (Intel 6th-10th gen / UHD 620 class)
-          set(GGML_NATIVE OFF CACHE BOOL "Disable runner-native SIMD detection" FORCE)
-          set(GGML_AVX512 OFF CACHE BOOL "" FORCE)
-          set(GGML_AVX512_VBMI OFF CACHE BOOL "" FORCE)
-          set(GGML_AVX512_VNNI OFF CACHE BOOL "" FORCE)
-          set(GGML_AVX512_BF16 OFF CACHE BOOL "" FORCE)
-          set(GGML_AVX2 ON CACHE BOOL "" FORCE)
-          set(GGML_AVX ON CACHE BOOL "" FORCE)
-          set(GGML_SSE42 ON CACHE BOOL "" FORCE)
-          '@ | Set-Content -Encoding utf8 "$env:RUNNER_TEMP\ggml-toolchain.cmake"
-
-          echo "CARGO_TARGET_DIR=D:\cargo" >> $env:GITHUB_ENV
-          echo "CMAKE_TOOLCHAIN_FILE=$env:RUNNER_TEMP\ggml-toolchain.cmake" >> $env:GITHUB_ENV
-          echo "CMAKE_INSTALL_PREFIX=C:/w" >> $env:GITHUB_ENV
-          echo "SOURCE_DATE_EPOCH=0" >> $env:GITHUB_ENV
-          echo "CMAKE_C_FLAGS=/arch:AVX2" >> $env:GITHUB_ENV
-          echo "CMAKE_CXX_FLAGS=/arch:AVX2" >> $env:GITHUB_ENV
-          echo "RUSTFLAGS=-C target-cpu=x86-64-v3" >> $env:GITHUB_ENV
+          shared-key: ${{ matrix.os == 'windows-latest' && 'windows' || 'non-windows' }}
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-22.04'
@@ -181,13 +155,7 @@ jobs:
           sudo apt-get install -y \
             build-essential pkg-config cmake \
             libgtk-3-dev "$WEBKIT_PKG" \
-            libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev patchelf \
-            libvulkan1 libvulkan-dev vulkan-tools
-
-          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk
+            libayatana-appindicator3-dev librsvg2-dev libasound2-dev libxdo-dev patchelf
 
       - name: Install dependencies
         run: npm ci
@@ -219,12 +187,6 @@ jobs:
         run: |
           cl.exe 2>&1 | Select-Object -First 3
           cmake --version
-
-      - name: Bust whisper-rs-sys cache for CPU baseline (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        working-directory: apps/desktop/src-tauri
-        run: cargo clean -p whisper-rs-sys
 
       - name: Install SimplySign Desktop (Windows)
         if: matrix.os == 'windows-latest'
@@ -337,20 +299,6 @@ jobs:
           TAURI_PLATFORM: ${{ matrix.tauri_platform }}
           URW_DESKTOP_PLATFORM: ${{ matrix.node_platform }}
         run: npm run build -- --filter=desktop...
-
-      - name: Verify whisper CPU baseline flags (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        working-directory: apps/desktop/src-tauri
-        run: |
-          $log = Join-Path $env:RUNNER_TEMP "whisper-rs-sys-build.log"
-          cargo build -p whisper-rs-sys -vv 2>&1 | Tee-Object -FilePath $log
-          $content = Get-Content $log -Raw
-          if ($content -match '/arch:AVX512|GGML_AVX512:BOOL=ON') {
-            Write-Error "AVX-512 detected in whisper-rs-sys build — CPU baseline fix failed."
-            exit 1
-          }
-          Write-Host "CPU baseline check passed: no AVX-512 in whisper-rs-sys build."
 
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
