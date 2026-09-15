@@ -85,7 +85,7 @@ jobs:
             node_platform: linux
             args: ""
           - label: Windows
-            os: windows-latest
+            os: windows-2022
             args: ""
             rust_targets: ""
             tauri_platform: windows
@@ -109,6 +109,8 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+      # Skip WiX ICE validation (VBSCRIPT / LGHT0217 on GitHub-hosted Windows).
+      TAURI_WIX_SKIP_MSI_VALIDATION: true
     steps:
       - name: Checkout URW source
         uses: actions/checkout@v4
@@ -137,7 +139,7 @@ jobs:
         with:
           workspaces: |
             apps/desktop/src-tauri -> target
-          shared-key: ${{ matrix.os == 'windows-latest' && 'windows' || 'non-windows' }}
+          shared-key: ${{ matrix.os == 'windows-2022' && 'windows' || 'non-windows' }}
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-22.04'
@@ -161,12 +163,12 @@ jobs:
         run: npm ci
 
       - name: Download VC++ redistributable
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: ./scripts/ci/download-vc-redist.ps1
 
       - name: Install Windows build deps
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: |
           choco install -y llvm
@@ -176,30 +178,30 @@ jobs:
           "C:\Program Files\LLVM\bin"                       >> $env:GITHUB_PATH
 
       - name: Setup MSVC developer environment (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64
 
       - name: Verify Windows build toolchain (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: |
           cl.exe 2>&1 | Select-Object -First 3
           cmake --version
 
       - name: Install SimplySign Desktop (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts/ci/install-simplysign.ps1
 
       - name: Configure SimplySign for CI (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts/ci/configure-simplysign.ps1
 
       - name: Connect SimplySign cloud certificate (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2022'
         uses: nick-fields/retry@v3
         env:
           CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
