@@ -113,18 +113,19 @@ jobs:
       TAURI_WIX_SKIP_MSI_VALIDATION: true
     steps:
       - name: Checkout URW source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: AkselHough/URW
           ref: ${{ needs.metadata.outputs.ref }}
           token: ${{ secrets.URW_SOURCE_TOKEN }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json
+          package-manager-cache: false
 
       - name: Sync Tauri release configuration
         run: node scripts/ci/set-tauri-release-config.mjs
@@ -202,7 +203,7 @@ jobs:
 
       - name: Connect SimplySign cloud certificate (Windows)
         if: matrix.os == 'windows-2022'
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         env:
           CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
@@ -215,7 +216,7 @@ jobs:
       - name: Import Apple signing certificate
         if: matrix.os == 'macos-26'
         id: import-macos-cert
-        uses: apple-actions/import-codesign-certs@v2
+        uses: apple-actions/import-codesign-certs@v7
         with:
           create-keychain: true
           keychain: build
@@ -341,7 +342,7 @@ jobs:
       CHANNEL_TAG: ${{ needs.metadata.outputs.channel_tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download latest.json from release
         run: |

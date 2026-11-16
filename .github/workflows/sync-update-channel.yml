@@ -25,7 +25,7 @@ jobs:
       CHANNEL_TAG: desktop-prod
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download latest.json from published release
         run: |
