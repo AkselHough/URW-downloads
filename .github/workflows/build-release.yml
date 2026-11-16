@@ -73,7 +73,7 @@ jobs:
       matrix:
         include:
           - label: macOS (universal)
-            os: macos-14
+            os: macos-26
             args: "--target universal-apple-darwin"
             rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
             tauri_platform: macos
@@ -213,7 +213,7 @@ jobs:
           command: powershell -ExecutionPolicy Bypass -File scripts/ci/connect-simplysign.ps1
 
       - name: Import Apple signing certificate
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-26'
         id: import-macos-cert
         uses: apple-actions/import-codesign-certs@v2
         with:
@@ -224,7 +224,7 @@ jobs:
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
       - name: Assert Developer ID Application identity is present
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-26'
         run: |
           set -euo pipefail
           out="$(security find-identity -v -p codesigning)"
@@ -235,7 +235,7 @@ jobs:
           }
 
       - name: Prepare Apple notary API key
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-26'
         run: |
           set -euo pipefail
           echo "$APPLE_API_KEY_BASE64" | base64 -d > AuthKey.p8
@@ -243,7 +243,7 @@ jobs:
         shell: bash
 
       - name: Verify Apple signing identity
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-26'
         run: |
           set -euo pipefail
           keychain_path="${{ steps.import-macos-cert.outputs['keychain-path'] }}"
@@ -262,7 +262,7 @@ jobs:
           fi
 
       - name: Notary connectivity probe
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-26'
         run: |
           xcrun notarytool history \
             --key "${GITHUB_WORKSPACE}/AuthKey.p8" \
